@@ -202,6 +202,47 @@ def build_clear_choir(seed=21):
     return out / rms(out) * rms(voc)
 
 
+def formant_shift(x, semis):
+    """تغییر رنگ صدا (فرمنت) بدون تغییر نت: اول نت و فرمنت با هم بالا می‌روند،
+    بعد فقط نت (با حفظ فرمنت) برمی‌گردد."""
+    y = time_stretch(x[None], SR, 1.0, semis, high_quality=True, preserve_formants=False)
+    y = time_stretch(y, SR, 1.0, -semis, high_quality=True, preserve_formants=True)[0][:len(x)]
+    return np.pad(y, (0, len(x) - len(y)))
+
+def wander_delay(x, base, depth, rate, r):
+    """تأخیری که آرام و نامنظم تغییر می‌کند (بین base-depth و base+depth ثانیه)
+    تا کپی‌ها مثل آدم‌های جدا شنیده شوند، نه صدای فلزی و رباتی."""
+    n = len(x); k = max(4, int(n / SR * rate))
+    ctrl = r.uniform(-1, 1, k)
+    curve = np.interp(np.linspace(0, k - 1, n), np.arange(k), ctrl)
+    curve = np.convolve(curve, np.ones(2048) / 2048, 'same')
+    d = (base + depth * curve) * SR
+    idx = np.arange(n) - d
+    return np.interp(idx, np.arange(n), x, left=0.0).astype(np.float32)
+
+def build_soft_choir(seed=31):
+    """همخوانی ملایم (نسخه ۵): بیشترِ جمعیت زن‌اند.
+    - ۵ صدای زنانه: همان نت، فرمنت ۲.۵ تا ۴ نیم‌پرده بالاتر
+    - ۲ صدای مردانه: همان نت، فرمنت کمی پایین‌تر و آرام‌تر
+    - بدون اکتاو پایین (عامل اصلی صدای رباتی در نسخه ۴)
+    - تأخیر متغیر ۲۵ تا ۷۰ میلی‌ثانیه، فیلتر ملایم و ریورب سالن"""
+    r = np.random.default_rng(seed)
+    mono = voc.mean(0).astype(np.float32)
+    out = np.zeros((2, N), np.float32)
+    voices = [('f', r.uniform(2.5, 4.0), 1.0) for _ in range(5)] + [('m', r.uniform(-1.2, -0.5), 0.45) for _ in range(2)]
+    for kind, fs, g in voices:
+        y = formant_shift(mono, float(fs))
+        y = Pedalboard([PitchShift(semitones=float(r.uniform(-0.08, 0.08))),
+                        HighpassFilter(220 if kind == 'f' else 140),
+                        LowpassFilter(r.uniform(3500, 5000)),
+                        PeakFilter(4000, -3.0, 1.0)])(y, SR)
+        y = wander_delay(y, r.uniform(0.04, 0.055), 0.02, r.uniform(0.2, 0.5), r)
+        out += pan(y, r.uniform(-0.95, 0.95)) * g * r.uniform(0.7, 1.0)
+    out = Pedalboard([Reverb(room_size=0.82, damping=0.55, wet_level=0.4, dry_level=0.7, width=1.0),
+                      Compressor(threshold_db=-26, ratio=2.5)])(out, SR)
+    return out / rms(out) * rms(voc)
+
+
 # ---------- خواننده اول در ترجیع‌بند آخر (دونفره) ----------
 def ltas(x):
     f, p = welch(x, SR, nperseg=4096); return f, p
@@ -272,7 +313,7 @@ def mix(cfg, choir, murmur, name):
     fx = np.zeros((2, N), np.float32)
     # همهمه
     if cfg.get('murmur'):
-        fx += (murmur if cfg.get('choir_src') != 'clear' else MURMUR_SAFE[0]) * env(N, [(a, b, d + CHEER_REF, 2.0, 2.0) for a, b, d in cfg['murmur']])
+        fx += (murmur if cfg.get('choir_src') == 'wash' else MURMUR_SAFE[0]) * env(N, [(a, b, d + CHEER_REF, 2.0, 2.0) for a, b, d in cfg['murmur']])
     # جیغ و تشویق
     for src, st, dur, t, g, fi, fo in cfg['cheers']:
         place(fx, cheer(src, st, dur, fi, fo), t, g + CHEER_REF + cfg.get('cheer_gain', 0))
@@ -289,7 +330,7 @@ def mix(cfg, choir, murmur, name):
     fx = Pedalboard([Reverb(room_size=rv['size'], wet_level=0.2, dry_level=1.0)])(fx, SR)
     # همخوانی (بدون ریورب دوباره)
     ch = cfg.get('choir_src', 'wash')
-    fx += (choir if ch == 'wash' else CLEAR_CHOIR[0]) * env(N, [(a, b, d, 1.0, 1.2) for a, b, d in cfg['choir']])
+    fx += (choir if ch == 'wash' else CLEAR_CHOIR[0] if ch == 'clear' else SOFT_CHOIR[0]) * env(N, [(a, b, d, 1.0, 1.2) for a, b, d in cfg['choir']])
 
     out = music + fx
     out = Pedalboard([Compressor(threshold_db=-14, ratio=2, attack_ms=20, release_ms=200),
@@ -380,7 +421,7 @@ VARIANTS['C_final_v3'] = dict(
     lead_boost=[c + (1.5,) for c in S2],
     duet=[CHORUS3])
 
-CLEAR_CHOIR, MURMUR_SAFE = [None], [None]
+CLEAR_CHOIR, MURMUR_SAFE, SOFT_CHOIR = [None], [None], [None]
 
 
 # ---------- نسخه ۴: بر اساس نکات دانشجو روی نسخه ۳ ----------
@@ -446,12 +487,29 @@ VARIANTS['D_final_v4'] = dict(
     lead_boost=[(68.3, 108.55, 2.0), (164.3, 202.0, 2.5), (220.95, 242.1, 1.5)],
     duet=[CHORUS3])
 
+# ---------- نسخه ۵: همخوانی ملایم با غلبه صدای زنان، بدون شعار اول ----------
+_v5 = dict(VARIANTS['D_final_v4'])
+_v5.update(
+    choir_src='soft',
+    chant_loop=[],                                   # شعار اول آهنگ فعلاً حذف شد
+    choir=[(29.6, 66.0, -14),                        # زیر خواننده ۱: خیلی ملایم
+           CH1A + (-10,), CH1A_E + (-8,), CH1B + (-10,), CH1B_E + (-8,),
+           (125.6, 144.8, -11),
+           (144.9, 161.0, -1),                       # فقط مردم
+           CH2A + (-9,), CH2A_E + (-7,), CH2B + (-9,), CH2B_E + (-7,),
+           (203.0, 220.4, -14),
+           (220.95, 242.1, -11)],
+    lead_duck=[(144.9, 161.0, -18)])
+VARIANTS['E_final_v5'] = _v5
+
 if __name__ == '__main__':
     only = sys.argv[3:] or list(VARIANTS)
     print('building choir...'); choir = build_crowd_choir()
     murmur = murmur_bed()
     if any(VARIANTS[k].get('choir_src') == 'clear' for k in only):
         print('building clear choir...'); CLEAR_CHOIR[0] = build_clear_choir()
-        MURMUR_SAFE[0] = murmur_bed(POOL_SAFE)
+    if any(VARIANTS[k].get('choir_src') == 'soft' for k in only):
+        print('building soft choir...'); SOFT_CHOIR[0] = build_soft_choir()
+    MURMUR_SAFE[0] = murmur_bed(POOL_SAFE)
     for k in only:
         print('mixing', k); print(' ->', mix(VARIANTS[k], choir, murmur, k))
