@@ -9,6 +9,8 @@
 import sys, os
 import numpy as np
 import soundfile as sf
+from pedalboard import time_stretch
+from scipy.signal import fftconvolve, welch
 from pedalboard import (Pedalboard, Reverb, HighpassFilter, LowpassFilter, LowShelfFilter,
                         HighShelfFilter, PeakFilter, Compressor, Limiter, PitchShift, Delay, Gain, Chorus)
 
@@ -85,15 +87,26 @@ def lclip(a, b):
     return c / rms(c) * 0.05
 
 # برچسب‌ها با گوش دانشجو تأیید شد (clips_for_review)
-CHEER_A = lclip(4, 31)      # clip1: تشویق و جیغ
 SCREAM = lclip(78, 80)      # clip3: فقط جیغ
-CHEER_B = lclip(110, 133)   # clip4: تشویق و جیغ
-CHEER_C = lclip(250, 255)   # clip6
-CHEER_D = lclip(266, 270)   # clip7
+# در تکه‌های تشویق چند لحظه آواز بود (مثلاً ثانیه ۱۳.۵ و ۱۲۳ تا ۱۳۳ نسخه لایو) که در نسخه اول
+# زیر اینترو شنیده می‌شد. با تشخیص صدای نت‌دار (pyin) فقط بازه‌های جیغ و تشویق خالی نگه داشته شد:
+CLEAN_RANGES = [(14.0, 20.5), (25.0, 31.0), (110.0, 122.0), (250.0, 254.0)]
+def build_pool():
+    xf = int(0.3 * SR); out = None
+    for a, b in CLEAN_RANGES:
+        c = live_v[:, int(a * SR):int(b * SR)]
+        c = Pedalboard([HighpassFilter(120)])(c, SR)
+        c = c / rms(c) * 0.05
+        if out is None: out = c; continue
+        r = np.linspace(0, 1, xf)
+        out = np.concatenate([out[:, :-xf], out[:, -xf:] * (1 - r) + c[:, :xf] * r, c[:, xf:]], axis=1)
+    return out
+POOL = build_pool()         # حدود ۲۸ ثانیه جیغ و تشویق خالی
 CHANT = lclip(44.2, 48.7)   # clip2: «بزن باران بزن» (همخوانی واقعی)
 
-def cheer(src, start, dur, fo=1.5):
-    return fade(src[:, int(start * SR):int((start + dur) * SR)], 0.15, fo)
+def cheer(src, start, dur, fi=0.4, fo=3.5):
+    # جیغ‌ها آرام محو می‌شوند و یک‌باره قطع نمی‌شوند
+    return fade(src[:, int(start * SR):int((start + dur) * SR)], fi, fo)
 
 
 # ---------- شمارش درامر (چوب درام) ----------
@@ -140,25 +153,49 @@ def build_crowd_choir(seed=11, voices=14):
     for i in range(voices):
         male = r.random() < 0.4                     # بخشی از جمعیت یک اکتاو پایین‌تر می‌خوانند
         semis = (-12.0 if male else 0.0) + r.normal(0, 0.15)   # کمی خارج از کوک
-        delay = r.uniform(0.02, 0.11)                # دیرتر از خواننده
+        delay = r.uniform(0.03, 0.07)                # کمی دیرتر از خواننده
         chain = Pedalboard([
             PitchShift(semitones=float(semis)),
             HighpassFilter(r.uniform(150, 260)),
-            LowpassFilter(r.uniform(2200, 4500)),     # دورتر = تیره‌تر
-            Chorus(rate_hz=r.uniform(0.2, 0.6), depth=0.3, mix=0.5),
-        ])
+            LowpassFilter(r.uniform(1800, 3200)),     # دورتر = تیره‌تر
+                    ])
         y = chain(mono, SR)
         y = np.roll(y, int(delay * SR)); y[:int(delay * SR)] = 0
         # بلندی نامنظم هر نفر
         lfo = 1 + 0.35 * np.sin(2 * np.pi * r.uniform(0.05, 0.25) * np.arange(N) / SR + r.uniform(0, 6))
         out += pan(y * lfo, r.uniform(-1, 1)) * r.uniform(0.5, 1.0)
-    out = Pedalboard([Reverb(room_size=0.95, damping=0.4, wet_level=0.7, dry_level=0.35, width=1.0),
+    out = Pedalboard([Reverb(room_size=0.8, damping=0.6, wet_level=0.45, dry_level=0.5, width=1.0),
                       Compressor(threshold_db=-24, ratio=3)])(out, SR)
     return out / rms(out) * rms(voc)                 # هم‌سطح با وکال اصلی (قبل از گین)
 
 
+# ---------- خواننده اول در ترجیع‌بند آخر (دونفره) ----------
+def ltas(x):
+    f, p = welch(x, SR, nperseg=4096); return f, p
+
+SINGER1_REF = (29.6, 45.6)          # بند اول، فقط خواننده ۱
+def duet_voice(t0, t1):
+    """همان ملودی خواننده ۲، یک اکتاو پایین‌تر (در محدوده صدای خواننده ۱) با حفظ فرمنت،
+    و رنگ صدای نزدیک به خواننده ۱ با تطبیق طیف (EQ matching)."""
+    a, b = int((t0 - 0.5) * SR), int((t1 + 0.5) * SR)
+    seg = voc[:, a:b].mean(0).astype(np.float32)
+    y = time_stretch(seg[None], SR, 1.0, -12.0, high_quality=True, preserve_formants=True)[0]
+    ref = voc[:, int(SINGER1_REF[0] * SR):int(SINGER1_REF[1] * SR)].mean(0)
+    f, pr = ltas(ref); _, py = ltas(y)
+    sm = lambda p: np.convolve(p, np.ones(9) / 9, 'same')
+    g = np.sqrt(sm(pr) / (sm(py) + 1e-12)); g /= np.sqrt(np.mean(g[(f > 200) & (f < 4000)] ** 2))
+    g = np.clip(g, db(-9), db(9)); g[f < 90] = 0
+    fir = np.fft.irfft(g); fir = np.roll(fir, len(fir) // 2) * np.hanning(len(fir))
+    y = fftconvolve(y, fir, 'same').astype(np.float32)
+    y = Pedalboard([Compressor(threshold_db=-20, ratio=3), HighpassFilter(90)])(y, SR)
+    y = y / rms(y) * rms(seg)
+    out = np.zeros((2, N), np.float32)
+    place(out, pan(y, -0.25), (a / SR) + 0.012)        # ۱۲ میلی‌ثانیه اختلاف، کمی چپ
+    return out * env(N, [(t0, t1, 0, 0.3, 0.8)])
+
+
 def murmur_bed():
-    src = np.concatenate([CHEER_A, CHEER_B], axis=1)
+    src = POOL
     src = Pedalboard([LowpassFilter(2500)])(src, SR)
     reps = int(np.ceil(N / src.shape[1])) + 1
     xf = int(1.0 * SR); seg = fade(src, 1.0, 1.0)
@@ -177,32 +214,33 @@ def mix(cfg, choir, murmur, name):
     I = Pedalboard([HighpassFilter(30), LowShelfFilter(90, -3.0), PeakFilter(500, 2.0, 0.8),
                     HighShelfFilter(10000, -1.5)])(ins, SR)
     I = widen(I, 2.5)
-    # وکال: کمپرسور، حضور، اکوی کوتاه صحنه
+    # وکال: کمپرسور و حضور؛ بدون اکو تا صدای خواننده واضح و قوی بماند
     V = Pedalboard([Compressor(threshold_db=-20, ratio=3, attack_ms=5, release_ms=120),
-                    PeakFilter(3000, 1.5, 1.0), HighpassFilter(90)])(voc, SR)
-    V = V + Pedalboard([Delay(delay_seconds=0.095, feedback=0.1, mix=1.0), Gain(-18)])(V, SR)
+                    PeakFilter(3000, 1.5, 1.0), HighpassFilter(90)])(voc, SR) * db(1.0)
+    for t0, t1 in cfg.get('duet', []):
+        V = V + duet_voice(t0, t1) * db(-2.0)
     for t0, t1, d in cfg.get('lead_duck', []):   # لحظه‌هایی که فقط جمعیت می‌خواند
         g = 1 - (1 - db(d)) * env(N, [(t0, t1, 0, 0.25, 0.4)])
         V = V * g
     hall = Pedalboard([Reverb(room_size=rv['size'], damping=0.5, wet_level=1.0, dry_level=0.0, width=1.0)])
-    wet = hall(I * rv['ins'] + V * rv['voc'], SR)
+    wet = hall(I * rv['ins'] + V * rv['voc'] * 0.4, SR)   # ریورب کم روی وکال
     music = I + V + wet
 
     fx = np.zeros((2, N), np.float32)
-    # همخوانی
-    fx += choir * env(N, [(a, b, d, 1.0, 1.2) for a, b, d in cfg['choir']])
     # همهمه
     if cfg.get('murmur'):
         fx += murmur * env(N, [(a, b, d + CHEER_REF, 2.0, 2.0) for a, b, d in cfg['murmur']])
     # جیغ و تشویق
-    for src, st, dur, t, g in cfg['cheers']:
-        place(fx, cheer(src, st, dur), t, g + CHEER_REF + cfg.get('cheer_gain', 0))
+    for src, st, dur, t, g, fi, fo in cfg['cheers']:
+        place(fx, cheer(src, st, dur, fi, fo), t, g + CHEER_REF + cfg.get('cheer_gain', 0))
     for t, g in cfg.get('chant', []):
         place(fx, fade(CHANT, 0.05, 0.3), t, g + CHEER_REF)
     if cfg.get('claps'):
         fx += claps(*BREAK) * db(cfg['claps'] + CLAP_REF)
     fx += count_in()
     fx = Pedalboard([Reverb(room_size=rv['size'], wet_level=0.2, dry_level=1.0)])(fx, SR)
+    # همخوانی (بدون ریورب دوباره)
+    fx += choir * env(N, [(a, b, d, 1.0, 1.2) for a, b, d in cfg['choir']])
 
     out = music + fx
     out = Pedalboard([Compressor(threshold_db=-14, ratio=2, attack_ms=20, release_ms=200),
@@ -221,24 +259,26 @@ def mix(cfg, choir, murmur, name):
 CHEER_REF = 10.0   # جیغ/تشویق در لحظه‌های اوج حدود ۵ تا ۸ دسی‌بل زیر موزیک
 CLAP_REF = 14.0
 END = 242.5
-BASE_CHEERS = [
-    (CHEER_A, 0.0, 9.0, 0.0, -6),        # شروع: تشویق قبل از اجرا
-    (CHEER_B, 2.0, 4.0, 11.0, -8),       # ورود گروه
-    (CHEER_C, 0.0, 4.0, 29.3, -12),      # ورود خواننده ۱
-    (SCREAM, 0.0, 2.0, 67.8, -6),        # ورود خواننده ۲
-    (CHEER_B, 8.0, 4.0, 68.0, -12),
-    (CHEER_D, 0.0, 4.0, 108.6, -8),      # پایان کُرس اول
-    (SCREAM, 0.0, 2.0, 163.8, -7),       # کُرس دوم
-    (CHEER_C, 0.0, 4.0, 164.0, -12),
-    (SCREAM, 0.0, 2.0, 220.5, -5),       # کُرس آخر
-    (CHEER_B, 12.0, 5.0, 220.8, -10),
-    (CHEER_A, 9.0, 18.0, END, -6),       # تشویق پایانی
-    (CHEER_B, 0.0, 10.0, END + 1.5, -9),
+BASE_CHEERS = [   # (منبع، شروع در منبع، مدت، زمان در آهنگ، گین، فید ورود، فید خروج)
+    (POOL, 12.0, 10.0, 0.0, -17, 2.0, 3.0),     # شروع: جمعیت منتظر اجرا
+    (POOL, 0.0, 6.0, 11.0, -8, 0.4, 3.0),       # ورود گروه
+    (POOL, 24.0, 4.0, 29.0, -12, 0.4, 2.5),     # ورود خواننده ۱
+    (SCREAM, 0.0, 2.0, 67.6, -6, 0.05, 0.8),    # تعویض خواننده: ۱ -> ۲
+    (POOL, 14.0, 8.0, 67.8, -7, 0.4, 4.0),
+    (POOL, 6.5, 7.0, 108.6, -8, 0.4, 3.5),      # پایان کُرس اول
+    (POOL, 18.0, 6.0, 125.2, -11, 0.4, 3.0),    # تعویض: ۲ -> ۱
+    (SCREAM, 0.0, 2.0, 163.6, -6, 0.05, 0.8),   # تعویض: ۱ -> ۲
+    (POOL, 0.0, 8.0, 163.8, -7, 0.4, 4.0),
+    (POOL, 20.0, 6.0, 202.6, -11, 0.4, 3.0),    # تعویض: ۲ -> ۱ (بریج)
+    (SCREAM, 0.0, 2.0, 220.3, -5, 0.05, 0.8),   # کُرس آخر
+    (POOL, 8.0, 9.0, 220.5, -6, 0.4, 4.0),
+    (POOL, 0.0, 27.5, END, -6, 1.0, 8.0),       # تشویق پایانی
+    (POOL, 12.0, 14.0, END + 1.5, -9, 1.0, 6.0),
 ]
 MIX_LIGHT = dict(size=0.55, ins=0.10, voc=0.14)
 MIX_MED = dict(size=0.75, ins=0.14, voc=0.20)
 MIX_BIG = dict(size=0.92, ins=0.20, voc=0.28)
-GAPS = [(0, 11.5, -16), BREAK + (-20,), (END, N / SR, -14)]
+GAPS = [(0, 11.5, -21), BREAK + (-20,), (END, N / SR, -14)]
 
 VARIANTS = {
     # --- سری الف: شدت متفاوت ---
@@ -256,9 +296,9 @@ VARIANTS = {
     'B1_kors_kamel': dict(reverb=MIX_MED, cheers=BASE_CHEERS, murmur=GAPS, claps=-2,
                           choir=[CHORUS1 + (-9,), CHORUS2 + (-8,), CHORUS3 + (-6,)]),
     'B2_porsesh_pasokh': dict(reverb=MIX_MED, cheers=BASE_CHEERS, murmur=GAPS, claps=-2,
-                              choir=[CHORUS1_B + (-8,), CHORUS2_B + (-7,),
-                                     (CHORUS3[0], CHORUS3[0] + 4 * BAR, -3), (CHORUS3[0] + 4 * BAR, CHORUS3[1], -9)],
-                              lead_duck=[(CHORUS3[0], CHORUS3[0] + 4 * BAR, -22)]),
+                              # صدای خواننده ۲ قوی می‌ماند و جمعیت زیرش می‌خواند (بدون کم کردن صدای خواننده)
+                              choir=[CHORUS1_B + (-12,), CHORUS2_B + (-11,), CHORUS3 + (-10,)],
+                              duet=[CHORUS3]),          # ترجیع‌بند آخر: دو خواننده با هم
     'B3_garm_shodan': dict(reverb=MIX_MED, cheers=BASE_CHEERS, murmur=GAPS, claps=-2,
                            choir=[PRE1 + (-13,), PRE2 + (-11,), BRIDGE + (-9,),
                                   CHORUS1 + (-10,), CHORUS2 + (-8,), CHORUS3 + (-6,)],
