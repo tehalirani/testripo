@@ -1,0 +1,23 @@
+{
+ "ch1": {
+  "lead": -13.7,
+  "women": -22.7,
+  "men": -28.7,
+  "murmur": -42.9,
+  "crowd_vs_lead": -8.0
+ },
+ "ch2": {
+  "lead": -12.9,
+  "women": -18.9,
+  "men": -24.9,
+  "murmur": -39.2,
+  "crowd_vs_lead": -5.0
+ },
+ "ch3": {
+  "lead": -13.7,
+  "women": -17.7,
+  "men": -23.7,
+  "murmur": -38.5,
+  "crowd_vs_lead": -3.0
+ }
+}
