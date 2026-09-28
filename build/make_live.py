@@ -102,6 +102,11 @@ def build_pool():
         out = np.concatenate([out[:, :-xf], out[:, -xf:] * (1 - r) + c[:, :xf] * r, c[:, xf:]], axis=1)
     return out
 POOL = build_pool()         # حدود ۲۸ ثانیه جیغ و تشویق خالی
+# نسخه ۳: دانشجو در ثانیه ۱ تا ۵ نسخه ۲ (که از بازه ۱۱۰ تا ۱۲۲ برداشته شده بود) آواز جمعیت شنید.
+# همخوانی گروهی را pyin تشخیص نمی‌دهد، پس کل clip4 کنار گذاشته شد.
+CLEAN_RANGES = [(14.0, 20.5), (25.0, 31.0), (250.0, 254.0)]
+POOL_SAFE = build_pool()    # حدود ۱۶ ثانیه
+INTRO_V1 = lclip(4, 31)[:, :int(9 * SR)]   # اینتروی نسخه اول که دانشجو تأیید کرد (با همان نرمال‌سازی)
 CHANT = lclip(44.2, 48.7)   # clip2: «بزن باران بزن» (همخوانی واقعی)
 
 def cheer(src, start, dur, fi=0.4, fo=3.5):
@@ -169,6 +174,34 @@ def build_crowd_choir(seed=11, voices=14):
     return out / rms(out) * rms(voc)                 # هم‌سطح با وکال اصلی (قبل از گین)
 
 
+def build_clear_choir(seed=21):
+    """همخوانی واضح (نسخه ۳): همان کلمات و ملودی خواننده، با فرکانس (کوک) تغییر یافته.
+    - گروه آقایان: یک اکتاو پایین‌تر با حفظ فرمنت، تا کلمات واضح بمانند
+    - گروه هم‌صدا: هم‌اکتاو، با ۱۰ تا ۲۵ سنت خارج از کوک
+    - تأخیر کوتاه (۱۵ تا ۴۵ میلی‌ثانیه) تا مثل دوبله شدن صدا شنیده شود نه اکو
+    - ریورب کم و فیلتر روشن‌تر تا کلمات قابل تشخیص باشند"""
+    r = np.random.default_rng(seed)
+    mono = voc.mean(0).astype(np.float32)
+    octave = time_stretch(mono[None], SR, 1.0, -12.0, high_quality=True, preserve_formants=True)[0]
+    out = np.zeros((2, N), np.float32)
+    plan = [('oct', 5), ('uni', 5)]
+    for kind, n in plan:
+        for i in range(n):
+            src = octave if kind == 'oct' else mono
+            cents = r.uniform(10, 25) * r.choice([-1, 1])
+            y = Pedalboard([PitchShift(semitones=cents / 100),
+                            HighpassFilter(r.uniform(120, 200)),
+                            LowpassFilter(r.uniform(4500, 6500)),
+                            PeakFilter(r.uniform(700, 1400), r.uniform(-3, 3), 1.0)])(src, SR)
+            d = int(r.uniform(0.015, 0.045) * SR)
+            y = np.roll(y, d); y[:d] = 0
+            lfo = 1 + 0.2 * np.sin(2 * np.pi * r.uniform(0.05, 0.2) * np.arange(N) / SR + r.uniform(0, 6))
+            out += pan(y * lfo, r.uniform(-0.9, 0.9)) * r.uniform(0.6, 1.0)
+    out = Pedalboard([Reverb(room_size=0.7, damping=0.5, wet_level=0.25, dry_level=0.85, width=1.0),
+                      Compressor(threshold_db=-24, ratio=3)])(out, SR)
+    return out / rms(out) * rms(voc)
+
+
 # ---------- خواننده اول در ترجیع‌بند آخر (دونفره) ----------
 def ltas(x):
     f, p = welch(x, SR, nperseg=4096); return f, p
@@ -194,8 +227,8 @@ def duet_voice(t0, t1):
     return out * env(N, [(t0, t1, 0, 0.3, 0.8)])
 
 
-def murmur_bed():
-    src = POOL
+def murmur_bed(src=None):
+    src = POOL if src is None else src
     src = Pedalboard([LowpassFilter(2500)])(src, SR)
     reps = int(np.ceil(N / src.shape[1])) + 1
     xf = int(1.0 * SR); seg = fade(src, 1.0, 1.0)
@@ -219,6 +252,8 @@ def mix(cfg, choir, murmur, name):
                     PeakFilter(3000, 1.5, 1.0), HighpassFilter(90)])(voc, SR) * db(1.0)
     for t0, t1 in cfg.get('duet', []):
         V = V + duet_voice(t0, t1) * db(-2.0)
+    for t0, t1, d in cfg.get('lead_boost', []):   # نسخه ۳: خواننده روی همخوانی واضح‌تر
+        V = V * (1 + (db(d) - 1) * env(N, [(t0, t1, 0, 0.5, 0.5)]))
     for t0, t1, d in cfg.get('lead_duck', []):   # لحظه‌هایی که فقط جمعیت می‌خواند
         g = 1 - (1 - db(d)) * env(N, [(t0, t1, 0, 0.25, 0.4)])
         V = V * g
@@ -229,7 +264,7 @@ def mix(cfg, choir, murmur, name):
     fx = np.zeros((2, N), np.float32)
     # همهمه
     if cfg.get('murmur'):
-        fx += murmur * env(N, [(a, b, d + CHEER_REF, 2.0, 2.0) for a, b, d in cfg['murmur']])
+        fx += (murmur if cfg.get('choir_src') != 'clear' else MURMUR_SAFE[0]) * env(N, [(a, b, d + CHEER_REF, 2.0, 2.0) for a, b, d in cfg['murmur']])
     # جیغ و تشویق
     for src, st, dur, t, g, fi, fo in cfg['cheers']:
         place(fx, cheer(src, st, dur, fi, fo), t, g + CHEER_REF + cfg.get('cheer_gain', 0))
@@ -240,7 +275,8 @@ def mix(cfg, choir, murmur, name):
     fx += count_in()
     fx = Pedalboard([Reverb(room_size=rv['size'], wet_level=0.2, dry_level=1.0)])(fx, SR)
     # همخوانی (بدون ریورب دوباره)
-    fx += choir * env(N, [(a, b, d, 1.0, 1.2) for a, b, d in cfg['choir']])
+    ch = cfg.get('choir_src', 'wash')
+    fx += (choir if ch == 'wash' else CLEAR_CHOIR[0]) * env(N, [(a, b, d, 1.0, 1.2) for a, b, d in cfg['choir']])
 
     out = music + fx
     out = Pedalboard([Compressor(threshold_db=-14, ratio=2, attack_ms=20, release_ms=200),
@@ -305,9 +341,40 @@ VARIANTS = {
                            chant=[(beat(164 + 4), -4), (beat(164 + 12), -3)]),
 }
 
+# ---------- نسخه ۳ (نهایی): بر اساس B2 و بازخورد دانشجو ----------
+CHEERS_V3 = [
+    (INTRO_V1, 0.0, 9.0, 0.0, -6, 0.15, 1.5),       # اینترو دقیقاً مثل نسخه اول
+    (POOL_SAFE, 13.0, 3.5, 11.0, -8, 0.3, 2.5),      # ورود گروه (از clip6)
+    (POOL_SAFE, 7.0, 4.0, 29.0, -12, 0.4, 2.5),      # ورود خواننده ۱
+    (SCREAM, 0.0, 2.0, 67.6, -6, 0.05, 0.8),         # تعویض ۱ -> ۲
+    (POOL_SAFE, 0.0, 6.5, 67.8, -7, 0.4, 4.0),
+    (POOL_SAFE, 6.5, 6.0, 108.6, -8, 0.4, 3.5),      # پایان کُرس اول
+    (POOL_SAFE, 1.0, 5.5, 125.2, -11, 0.4, 3.0),     # تعویض ۲ -> ۱
+    (SCREAM, 0.0, 2.0, 163.6, -6, 0.05, 0.8),        # تعویض ۱ -> ۲
+    (POOL_SAFE, 6.2, 6.0, 163.8, -7, 0.4, 4.0),
+    (POOL_SAFE, 0.5, 6.0, 202.6, -11, 0.4, 3.0),     # تعویض ۲ -> ۱
+    (SCREAM, 0.0, 2.0, 220.3, -5, 0.05, 0.8),        # کُرس آخر
+    (POOL_SAFE, 7.0, 8.0, 220.5, -6, 0.4, 4.0),
+    (POOL_SAFE, 0.0, 16.0, END, -6, 1.0, 6.0),       # تشویق پایانی (دو لایه با شروع متفاوت)
+    (POOL_SAFE, 6.0, 10.0, END + 5.0, -9, 1.0, 5.0),
+]
+S1 = [(29.5, 66.0), (126.0, 162.5), (203.0, 220.6)]      # بخش‌های خواننده ۱
+S2 = [CHORUS1, CHORUS2, CHORUS3]                           # بخش‌های خواننده ۲
+VARIANTS['C_final_v3'] = dict(
+    reverb=MIX_MED, cheers=CHEERS_V3, claps=-2, choir_src='clear',
+    murmur=[BREAK + (-20,), (END, N / SR, -14)],           # بدون همهمه در اینترو
+    choir=[a + (-14,) for a in S1] + [CHORUS1 + (-6,), CHORUS2 + (-5,), CHORUS3 + (-4,)],
+    lead_boost=[c + (1.5,) for c in S2],
+    duet=[CHORUS3])
+
+CLEAR_CHOIR, MURMUR_SAFE = [None], [None]
+
 if __name__ == '__main__':
     only = sys.argv[3:] or list(VARIANTS)
     print('building choir...'); choir = build_crowd_choir()
     murmur = murmur_bed()
+    if any(VARIANTS[k].get('choir_src') == 'clear' for k in only):
+        print('building clear choir...'); CLEAR_CHOIR[0] = build_clear_choir()
+        MURMUR_SAFE[0] = murmur_bed(POOL_SAFE)
     for k in only:
         print('mixing', k); print(' ->', mix(VARIANTS[k], choir, murmur, k))
