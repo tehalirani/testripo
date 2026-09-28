@@ -254,7 +254,7 @@ def ltas(x):
     f, p = welch(x, SR, nperseg=4096); return f, p
 
 SINGER1_REF = (29.6, 45.6)          # بند اول، فقط خواننده ۱
-def duet_voice(t0, t1):
+def duet_voice(t0, t1, offset=0.012):
     """همان ملودی خواننده ۲، یک اکتاو پایین‌تر (در محدوده صدای خواننده ۱) با حفظ فرمنت،
     و رنگ صدای نزدیک به خواننده ۱ با تطبیق طیف (EQ matching)."""
     a, b = int((t0 - 0.5) * SR), int((t1 + 0.5) * SR)
@@ -270,7 +270,7 @@ def duet_voice(t0, t1):
     y = Pedalboard([Compressor(threshold_db=-20, ratio=3), HighpassFilter(90)])(y, SR)
     y = y / rms(y) * rms(seg)
     out = np.zeros((2, N), np.float32)
-    place(out, pan(y, -0.25), (a / SR) + 0.012)        # ۱۲ میلی‌ثانیه اختلاف، کمی چپ
+    place(out, pan(y, -0.25), (a / SR) + offset)       # پیش‌فرض ۱۲ میلی‌ثانیه اختلاف، کمی چپ
     return out * env(N, [(t0, t1, 0, 0.3, 0.8)])
 
 
@@ -306,7 +306,7 @@ def mix(cfg, choir, murmur, name):
     V = Pedalboard([Compressor(threshold_db=-20, ratio=3, attack_ms=5, release_ms=120),
                     PeakFilter(3000, 1.5, 1.0), HighpassFilter(90)])(voc, SR) * db(1.0)
     for t0, t1 in cfg.get('duet', []):
-        V = V + duet_voice(t0, t1) * db(-2.0)
+        V = V + duet_voice(t0, t1, cfg.get('duet_offset', 0.012)) * db(-2.0)
     for t0, t1, d in cfg.get('lead_boost', []):   # نسخه ۳: خواننده روی همخوانی واضح‌تر
         V = V * (1 + (db(d) - 1) * env(N, [(t0, t1, 0, 0.5, 0.5)]))
     for t0, t1, d in cfg.get('lead_duck', []):   # لحظه‌هایی که فقط جمعیت می‌خواند
