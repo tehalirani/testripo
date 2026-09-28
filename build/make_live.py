@@ -243,6 +243,12 @@ def build_soft_choir(seed=31):
     return out / rms(out) * rms(voc)
 
 
+def to_sides(x, mid_db=-9.0):
+    """نسخه ۶: جمعیت به کناره‌های استریو می‌رود تا صدای خواننده (وسط) آن را نپوشاند."""
+    m, sd = (x[0] + x[1]) / 2 * db(mid_db), (x[0] - x[1]) / 2
+    return np.stack([m + sd, m - sd])
+
+
 # ---------- خواننده اول در ترجیع‌بند آخر (دونفره) ----------
 def ltas(x):
     f, p = welch(x, SR, nperseg=4096); return f, p
@@ -330,7 +336,9 @@ def mix(cfg, choir, murmur, name):
     fx = Pedalboard([Reverb(room_size=rv['size'], wet_level=0.2, dry_level=1.0)])(fx, SR)
     # همخوانی (بدون ریورب دوباره)
     ch = cfg.get('choir_src', 'wash')
-    fx += (choir if ch == 'wash' else CLEAR_CHOIR[0] if ch == 'clear' else SOFT_CHOIR[0]) * env(N, [(a, b, d, 1.0, 1.2) for a, b, d in cfg['choir']])
+    src = {'wash': lambda: choir, 'clear': lambda: CLEAR_CHOIR[0], 'soft': lambda: SOFT_CHOIR[0],
+           'soft_sides': lambda: to_sides(SOFT_CHOIR[0])}[ch]()
+    fx += src * env(N, [(a, b, d, 1.0, 1.2) for a, b, d in cfg['choir']])
 
     out = music + fx
     out = Pedalboard([Compressor(threshold_db=-14, ratio=2, attack_ms=20, release_ms=200),
@@ -502,14 +510,32 @@ _v5.update(
     lead_duck=[(144.9, 161.0, -18)])
 VARIANTS['E_final_v5'] = _v5
 
+# ---------- نسخه ۶: همان همخوانی نسخه ۵، در کناره‌های استریو و کمی بلندتر ----------
+_v6 = dict(VARIANTS['E_final_v5'])
+_v6.update(
+    choir_src='soft_sides',
+    # گین‌ها بعد از حذف بخش وسط اندازه‌گیری شدند: همخوانی حدود ۴ تا ۶ دسی‌بل زیر خواننده
+    # و در کناره‌ها حدود ۳ دسی‌بل بالاتر از سازها
+    choir=[(29.6, 66.0, -5),
+           CH1A + (0,), CH1A_E + (2,), CH1B + (0,), CH1B_E + (2,),
+           (125.6, 144.8, -1),
+           (144.9, 161.0, 4),                        # فقط مردم
+           CH2A + (1,), CH2A_E + (3,), CH2B + (1,), CH2B_E + (3,),
+           (203.0, 220.4, -5),
+           (220.95, 242.1, -1)])
+VARIANTS['F_final_v6'] = _v6
+
 if __name__ == '__main__':
     only = sys.argv[3:] or list(VARIANTS)
     print('building choir...'); choir = build_crowd_choir()
     murmur = murmur_bed()
     if any(VARIANTS[k].get('choir_src') == 'clear' for k in only):
         print('building clear choir...'); CLEAR_CHOIR[0] = build_clear_choir()
-    if any(VARIANTS[k].get('choir_src') == 'soft' for k in only):
-        print('building soft choir...'); SOFT_CHOIR[0] = build_soft_choir()
+    if any(VARIANTS[k].get('choir_src') in ('soft', 'soft_sides') for k in only):
+        cache = os.path.join(WORK, 'soft_choir_31.npy')
+        if os.path.exists(cache): SOFT_CHOIR[0] = np.load(cache)
+        else:
+            print('building soft choir...'); SOFT_CHOIR[0] = build_soft_choir(); np.save(cache, SOFT_CHOIR[0])
     MURMUR_SAFE[0] = murmur_bed(POOL_SAFE)
     for k in only:
         print('mixing', k); print(' ->', mix(VARIANTS[k], choir, murmur, k))
