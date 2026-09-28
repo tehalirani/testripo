@@ -1,0 +1,54 @@
+{
+ "a": {
+  "f_shift": [
+   1.0,
+   1.5
+  ],
+  "people": 20,
+  "level": 0.0,
+  "lead": -13.7,
+  "women": -22.8,
+  "men": -28.8,
+  "murmur": -43.0,
+  "crowd_vs_lead": -8.0
+ },
+ "b": {
+  "f_shift": [
+   2.0,
+   2.5
+  ],
+  "people": 20,
+  "level": 0.0,
+  "lead": -13.7,
+  "women": -22.7,
+  "men": -28.7,
+  "murmur": -42.9,
+  "crowd_vs_lead": -8.0
+ },
+ "c": {
+  "f_shift": [
+   2.0,
+   2.5
+  ],
+  "people": 30,
+  "level": 2.0,
+  "lead": -13.7,
+  "women": -20.7,
+  "men": -26.7,
+  "murmur": -40.9,
+  "crowd_vs_lead": -6.0
+ },
+ "d": {
+  "f_shift": [
+   2.5,
+   3.0
+  ],
+  "people": 30,
+  "level": 3.0,
+  "lead": -13.7,
+  "women": -19.8,
+  "men": -25.8,
+  "murmur": -40.0,
+  "crowd_vs_lead": -5.0
+ }
+}
