@@ -28,6 +28,8 @@ TESTS = {
     'b': dict(f_shift=(2.0, 2.5), people=20, level=0.0),
     'c': dict(f_shift=(2.0, 2.5), people=30, level=+2.0),
     'd': dict(f_shift=(2.5, 3.0), people=30, level=+3.0),
+    # نسخه کامل: تعداد و رنگ صدای c با سطوح دقیق مشخصات دانشجو (‎-8/‎-5/‎-3)
+    'c0': dict(f_shift=(2.0, 2.5), people=30, level=0.0),
 }
 
 
@@ -145,6 +147,12 @@ def base_cfg(extra):
     inside = lambda a, b: any(a >= s - 0.01 and b <= e + 0.01 for s, e in chorus_spans)
     v['choir'] = [c for c in v['choir'] if not inside(c[0], c[1])]   # همخوانی قبلی کُرس‌ها برداشته شد
     v['lead_dry'] = list(CHORUSES.values())
+    # اینترو: به‌جای شعار «بزن باران»، جیغ و تشویق ریتمیک تا ورود خواننده ۱، و یک اوج ناگهانی برای خواننده ۱
+    v['chant_loop'] = []
+    v['rhythm_cheer'] = [(12.5, 29.2, -1)]
+    v['cheers'] = [c for c in v['cheers'] if not (c[3] == 27.4)] + [
+        (M.SCREAM, 0.0, 2.0, 28.95, -3, 0.03, 1.0),
+        (M.POOL_SAFE, 0.0, 7.0, 28.9, -4, 0.25, 4.5)]
     v['extra_fx'] = extra
     return v
 

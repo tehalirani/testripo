@@ -326,6 +326,8 @@ def mix(cfg, choir, murmur, name):
     # جیغ و تشویق
     for src, st, dur, t, g, fi, fo in cfg['cheers']:
         place(fx, cheer(src, st, dur, fi, fo), t, g + CHEER_REF + cfg.get('cheer_gain', 0))
+    for t0, t1, g in cfg.get('rhythm_cheer', []):
+        fx += rhythmic_cheer(t0, t1) * db(g + CHEER_REF)
     for t0, reps, gains in cfg.get('chant_loop', []):
         fx += chant_loop(t0, reps, [g + CHEER_REF for g in gains])
     for t, g in cfg.get('chant', []):
@@ -435,6 +437,33 @@ VARIANTS['C_final_v3'] = dict(
     duet=[CHORUS3])
 
 CLEAR_CHOIR, MURMUR_SAFE, SOFT_CHOIR = [None], [None], [None]
+
+def rhythmic_cheer(t0, t1, seed=9):
+    """جیغ و تشویق ریتمیک (نسخه ۷): همهمه‌ی تشویق روی هر ضرب اوج می‌گیرد (ضرب‌های ۱ و ۳ قوی‌تر)،
+    به‌علاوه‌ی جیغ‌های کوتاه روی ضرب‌های زوج با کمی خطای زمانی طبیعی. کمی هم رو به جلو بلندتر می‌شود."""
+    r = np.random.default_rng(seed)
+    n0, n1 = int(t0 * SR), int(t1 * SR); n = n1 - n0
+    src = POOL_SAFE
+    reps = int(np.ceil(n / src.shape[1])) + 1
+    bed = np.concatenate([src] * reps, axis=1)[:, :n]
+    t = np.arange(n) / SR + t0
+    pulse = np.full(n, 0.12, np.float32)
+    k0 = int(np.ceil((t0 - BEAT0) / BEAT)); k1 = int((t1 - BEAT0) / BEAT)
+    for k in range(k0, k1 + 1):
+        tb = beat(k); strong = 1.0 if k % 2 == 0 else 0.6
+        d = t - tb; m = d >= 0
+        pulse[m] += (strong * np.exp(-d[m] / 0.18)).astype(np.float32)
+    rise = np.linspace(db(-3), 1, n).astype(np.float32)
+    out = np.zeros((2, N), np.float32)
+    out[:, n0:n1] = bed * pulse / pulse.max() * rise
+    for k in range(k0, k1 + 1):
+        if k % 2 == 1:
+            sc = SCREAM[:, :int(0.45 * SR)]
+            sc = Pedalboard([PitchShift(semitones=float(r.uniform(-1, 1)))])(sc, SR)
+            place(out, pan(fade(sc, 0.01, 0.2).mean(0), r.uniform(-0.8, 0.8)) * r.uniform(0.4, 0.8),
+                  beat(k) + r.normal(0, 0.02))
+    return out * env(N, [(t0, t1, 0, 0.6, 0.4)])
+
 
 def load_clear_choir():
     cache = os.path.join(WORK, 'clear_choir_21.npy')
