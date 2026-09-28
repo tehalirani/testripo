@@ -313,7 +313,10 @@ def mix(cfg, choir, murmur, name):
         g = 1 - (1 - db(d)) * env(N, [(t0, t1, 0, 0.25, 0.4)])
         V = V * g
     hall = Pedalboard([Reverb(room_size=rv['size'], damping=0.5, wet_level=1.0, dry_level=0.0, width=1.0)])
-    wet = hall(I * rv['ins'] + V * rv['voc'] * 0.4, SR)   # ریورب کم روی وکال
+    vsend = V * rv['voc'] * 0.4
+    if cfg.get('lead_dry'):   # نسخه ۷: خواننده ۲ در کُرس‌ها کاملاً خشک (بدون ریورب)
+        vsend = vsend * (1 - env(N, [(a, b, 0, 0.5, 0.5) for a, b in cfg['lead_dry']]))
+    wet = hall(I * rv['ins'] + vsend, SR)
     music = I + V + wet
 
     fx = np.zeros((2, N), np.float32)
@@ -339,6 +342,8 @@ def mix(cfg, choir, murmur, name):
     src = {'wash': lambda: choir, 'clear': lambda: CLEAR_CHOIR[0], 'soft': lambda: SOFT_CHOIR[0],
            'soft_sides': lambda: to_sides(SOFT_CHOIR[0])}[ch]()
     fx += src * env(N, [(a, b, d, 1.0, 1.2) for a, b, d in cfg['choir']])
+    if cfg.get('extra_fx') is not None:   # نسخه ۷: لایه‌ی جمعیت کُرس‌ها (crowd_v7.py)
+        fx += cfg['extra_fx']
 
     out = music + fx
     out = Pedalboard([Compressor(threshold_db=-14, ratio=2, attack_ms=20, release_ms=200),
@@ -430,6 +435,13 @@ VARIANTS['C_final_v3'] = dict(
     duet=[CHORUS3])
 
 CLEAR_CHOIR, MURMUR_SAFE, SOFT_CHOIR = [None], [None], [None]
+
+def load_clear_choir():
+    cache = os.path.join(WORK, 'clear_choir_21.npy')
+    if os.path.exists(cache): CLEAR_CHOIR[0] = np.load(cache)
+    else:
+        print('building clear choir...'); CLEAR_CHOIR[0] = build_clear_choir(); np.save(cache, CLEAR_CHOIR[0])
+    MURMUR_SAFE[0] = murmur_bed(POOL_SAFE)
 
 
 # ---------- نسخه ۴: بر اساس نکات دانشجو روی نسخه ۳ ----------
@@ -530,7 +542,7 @@ if __name__ == '__main__':
     print('building choir...'); choir = build_crowd_choir()
     murmur = murmur_bed()
     if any(VARIANTS[k].get('choir_src') == 'clear' for k in only):
-        print('building clear choir...'); CLEAR_CHOIR[0] = build_clear_choir()
+        load_clear_choir()
     if any(VARIANTS[k].get('choir_src') in ('soft', 'soft_sides') for k in only):
         cache = os.path.join(WORK, 'soft_choir_31.npy')
         if os.path.exists(cache): SOFT_CHOIR[0] = np.load(cache)
