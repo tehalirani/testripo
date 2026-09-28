@@ -247,6 +247,14 @@ def mix(cfg, choir, murmur, name):
     I = Pedalboard([HighpassFilter(30), LowShelfFilter(90, -3.0), PeakFilter(500, 2.0, 0.8),
                     HighShelfFilter(10000, -1.5)])(ins, SR)
     I = widen(I, 2.5)
+    for t0, t1, d, back in cfg.get('ins_dip', []):   # کم شدن تدریجی سازها و برگشت روی ضرب
+        g = np.ones(N, np.float32); t = np.arange(N) / SR
+        ramp = np.clip((t - t0) / (t1 - t0), 0, 1)
+        g = 1 - (1 - db(d)) * ramp
+        g[t >= back] = 1.0
+        k = int(back * SR); w = int(0.25 * SR)
+        g[k:k + w] = np.linspace(db(d), 1, w)
+        I = I * g
     # وکال: کمپرسور و حضور؛ بدون اکو تا صدای خواننده واضح و قوی بماند
     V = Pedalboard([Compressor(threshold_db=-20, ratio=3, attack_ms=5, release_ms=120),
                     PeakFilter(3000, 1.5, 1.0), HighpassFilter(90)])(voc, SR) * db(1.0)
@@ -268,10 +276,15 @@ def mix(cfg, choir, murmur, name):
     # جیغ و تشویق
     for src, st, dur, t, g, fi, fo in cfg['cheers']:
         place(fx, cheer(src, st, dur, fi, fo), t, g + CHEER_REF + cfg.get('cheer_gain', 0))
+    for t0, reps, gains in cfg.get('chant_loop', []):
+        fx += chant_loop(t0, reps, [g + CHEER_REF for g in gains])
     for t, g in cfg.get('chant', []):
         place(fx, fade(CHANT, 0.05, 0.3), t, g + CHEER_REF)
     if cfg.get('claps'):
-        fx += claps(*BREAK) * db(cfg['claps'] + CLAP_REF)
+        cl = claps(*BREAK) * db(cfg['claps'] + CLAP_REF)
+        for t0, t1, d, back in cfg.get('ins_dip', []):
+            cl *= 1 - (1 - db(d)) * np.clip((np.arange(N) / SR - t0) / (t1 - t0), 0, 1)
+        fx += cl
     fx += count_in()
     fx = Pedalboard([Reverb(room_size=rv['size'], wet_level=0.2, dry_level=1.0)])(fx, SR)
     # همخوانی (بدون ریورب دوباره)
@@ -368,6 +381,70 @@ VARIANTS['C_final_v3'] = dict(
     duet=[CHORUS3])
 
 CLEAR_CHOIR, MURMUR_SAFE = [None], [None]
+
+
+# ---------- نسخه ۴: بر اساس نکات دانشجو روی نسخه ۳ ----------
+# شعار واقعی «بزن باران، بزن باران بزن» از نسخه لایو: از ضرب ۴۴.۱۵ تا ۴۸.۸۶ ثانیه = ۸ ضرب با تمپوی ۱۰۳.۴
+LIVE_BEAT = 60 / 103.36
+CHANT_BAR2 = lclip(44.10, 44.10 + 8 * LIVE_BEAT)
+
+def chant_loop(t_start, reps, gains, seed=5):
+    """شعار را با تمپوی آهنگ ما (۱۰۰) هماهنگ می‌کند و هر ۸ ضرب تکرار می‌کند.
+    هر تکرار با چند لایه‌ی کمی متفاوت ساخته می‌شود تا عین هم شنیده نشود."""
+    r = np.random.default_rng(seed)
+    base = time_stretch(CHANT_BAR2, SR, LIVE_BEAT / BEAT, 0.0, high_quality=True, preserve_formants=True)
+    out = np.zeros((2, N), np.float32)
+    for k in range(reps):
+        rep = base.copy()
+        for _ in range(2):   # دو لایه‌ی اضافه = جمعیت بزرگ‌تر
+            y = Pedalboard([PitchShift(semitones=float(r.uniform(-0.2, 0.2))),
+                            LowpassFilter(r.uniform(3000, 5000))])(base, SR)
+            d = int(r.uniform(0.015, 0.04) * SR)
+            y = np.roll(y, d, axis=1); y[:, :d] = 0
+            y = y[::-1] if r.random() < 0.5 else y   # جابه‌جایی چپ و راست
+            rep = rep + y * r.uniform(0.5, 0.8)
+        rep = fade(rep / rms(rep) * 0.05, 0.03, 0.4)
+        place(out, rep, t_start + k * 8 * BEAT, gains[k])
+    return out
+
+
+CH1A, CH1A_E, CH1B, CH1B_E = (68.3, 80.5), (80.75, 86.6), (87.85, 102.6), (102.7, 108.55)
+CH2A, CH2A_E, CH2B, CH2B_E = (164.3, 176.4), (176.75, 182.55), (183.85, 195.8), (195.95, 202.0)
+BAND_IN = beat(3)                       # «بعد از ضرب سوم» ورود گروه
+CHEERS_V4 = [
+    (INTRO_V1, 0.0, 9.0, 0.0, -6, 0.15, 4.0),        # اینترو؛ این بار آرام تا شمارش درامر کم می‌شود
+    (POOL_SAFE, 13.0, 3.5, 11.0, -8, 0.3, 2.5),      # ورود گروه
+    (POOL_SAFE, 0.0, 7.0, 27.4, -8, 1.8, 4.0),       # ورود خواننده ۱: بالا می‌رود و آرام پایین می‌آید
+    (SCREAM, 0.0, 2.0, 67.6, -6, 0.05, 0.8),         # ورود خواننده ۲
+    (POOL_SAFE, 0.0, 6.5, 67.8, -7, 0.4, 4.0),
+    (POOL_SAFE, 6.5, 6.0, 108.6, -8, 0.4, 3.5),      # پایان کُرس اول
+    (SCREAM, 0.0, 2.0, 121.6, -6, 0.5, 1.0),         # آخر بخش درامز: جیغ و بعد فید
+    (POOL_SAFE, 6.5, 6.5, 121.0, -6, 1.2, 4.0),
+    (SCREAM, 0.0, 2.0, 163.6, -6, 0.05, 0.8),        # ورود دوباره خواننده ۲
+    (POOL_SAFE, 6.2, 6.0, 163.8, -7, 0.4, 4.0),
+    (POOL_SAFE, 0.5, 6.0, 202.6, -11, 0.4, 3.0),     # بریج
+    (SCREAM, 0.0, 2.0, 220.3, -5, 0.05, 0.8),        # کُرس آخر
+    (POOL_SAFE, 7.0, 8.0, 220.5, -6, 0.4, 4.0),
+    (POOL_SAFE, 0.0, 16.0, 240.5, -6, 1.5, 7.0),     # تشویق بعد از دقیقه ۴، با فید
+    (POOL_SAFE, 6.0, 10.0, 244.0, -9, 1.5, 6.0),
+]
+VARIANTS['D_final_v4'] = dict(
+    reverb=MIX_MED, cheers=CHEERS_V4, claps=-2, choir_src='clear',
+    murmur=[BREAK + (-20,), (242.0, N / SR, -14)],
+    # «بزن باران، بزن باران بزن» واقعی، با ریتم آهنگ، سه بار تا ورود خواننده ۱
+    chant_loop=[(BAND_IN, 3, [-4, -2.5, -1])],
+    # بخش درامز (۱:۵۰): آخرش تا ‎-10dB محو می‌شود و گروه روی ۲:۰۵.۴ برمی‌گردد
+    ins_dip=[(118.5, 125.2, -10, 125.4)],
+    choir=[(29.6, 66.0, -10),                          # زیر خواننده ۱: کم ولی شنیدنی
+           CH1A + (-4,), CH1A_E + (-1,), CH1B + (-3,), CH1B_E + (-1,),   # خواننده ۲: بلند، با اوج روی «به داد من برس»
+           (125.6, 144.8, -4),                         # ۲:۰۶ خواننده ۱ با جمعیت، بلند
+           (144.9, 161.0, 1),                          # ۲:۲۵ تا ۲:۴۱ فقط جمعیت
+           CH2A + (-3,), CH2A_E + (0,), CH2B + (-2,), CH2B_E + (0,),     # کُرس دوم: همراهی بیشتر
+           (203.0, 220.4, -10),                        # بریج
+           (220.95, 242.1, -6)],                       # آخر: هر دو خواننده + جمعیت، خواننده‌ها غالب
+    lead_duck=[(144.9, 161.0, -20)],                  # صدای خواننده ۱ تقریباً حذف
+    lead_boost=[(68.3, 108.55, 2.0), (164.3, 202.0, 2.5), (220.95, 242.1, 1.5)],
+    duet=[CHORUS3])
 
 if __name__ == '__main__':
     only = sys.argv[3:] or list(VARIANTS)
