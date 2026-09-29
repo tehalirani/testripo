@@ -1,0 +1,17 @@
+{
+ "self_voice1": {
+  "key_shift_median": -2.98,
+  "voice_median": "E3",
+  "octave_target": "D3"
+ },
+ "self_voice2": {
+  "key_shift_median": 4.02,
+  "voice_median": "A3",
+  "octave_target": "D4"
+ },
+ "self_voice3": {
+  "key_shift_median": 2.79,
+  "voice_median": "G2",
+  "octave_target": "B2"
+ }
+}
