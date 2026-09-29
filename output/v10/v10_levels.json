@@ -1,0 +1,83 @@
+{
+ "-9": {
+  "lead": -13.7,
+  "women": -23.7,
+  "men": -29.7,
+  "voices": [
+   {
+    "file": "kits_voice1_hamoktav.aac",
+    "lag": 2.241,
+    "male": false
+   },
+   {
+    "file": "kits_voice2_mard_oktav_paeen.aac",
+    "lag": 2.418,
+    "male": true
+   },
+   {
+    "file": "kits_voice3_hamoktav.aac",
+    "lag": 1.542,
+    "male": false
+   },
+   {
+    "file": "kits_voice4_hamoktav_roshan.aac",
+    "lag": 1.691,
+    "male": false
+   }
+  ]
+ },
+ "-6": {
+  "lead": -13.7,
+  "women": -20.7,
+  "men": -26.7,
+  "voices": [
+   {
+    "file": "kits_voice1_hamoktav.aac",
+    "lag": 2.241,
+    "male": false
+   },
+   {
+    "file": "kits_voice2_mard_oktav_paeen.aac",
+    "lag": 2.418,
+    "male": true
+   },
+   {
+    "file": "kits_voice3_hamoktav.aac",
+    "lag": 1.542,
+    "male": false
+   },
+   {
+    "file": "kits_voice4_hamoktav_roshan.aac",
+    "lag": 1.691,
+    "male": false
+   }
+  ]
+ },
+ "-3": {
+  "lead": -13.7,
+  "women": -17.7,
+  "men": -23.7,
+  "voices": [
+   {
+    "file": "kits_voice1_hamoktav.aac",
+    "lag": 2.241,
+    "male": false
+   },
+   {
+    "file": "kits_voice2_mard_oktav_paeen.aac",
+    "lag": 2.418,
+    "male": true
+   },
+   {
+    "file": "kits_voice3_hamoktav.aac",
+    "lag": 1.542,
+    "male": false
+   },
+   {
+    "file": "kits_voice4_hamoktav_roshan.aac",
+    "lag": 1.691,
+    "male": false
+   }
+  ]
+ }
+}
