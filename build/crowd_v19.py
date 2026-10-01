@@ -24,6 +24,22 @@ from make_live import (SR, N, db, rms, env, Pedalboard, HighpassFilter, LowpassF
 V17.REL_DB = -2.0
 V16.CHANT_REL_DB = -2.0
 LIVE_REF_DB = -1.0
+CAP_DB = -2.0      # هر جا خواننده می‌خواند، کل جمعیت حداکثر ۲ دسی‌بل زیر خواننده
+
+
+def cap_under_lead(crowd, boost):
+    """سقف بلندی جمعیت نسبت به خواننده، پنجره‌های ۰.۵ ثانیه‌ای (گین هموار). جاهای بی‌آواز آزاد است."""
+    w = int(0.5 * SR); n = N // w
+    c = np.sqrt((crowd[:, :n * w].reshape(2, n, w) ** 2).mean((0, 2))) + 1e-9
+    l = np.sqrt((M.voc[:, :n * w].reshape(2, n, w) ** 2).mean((0, 2))) + 1e-9
+    t = (np.arange(n) + 0.5) * w / SR
+    l = l * np.interp(t, *boost)
+    active = 20 * np.log10(l) > -35
+    over = 20 * np.log10(c) - (20 * np.log10(l) + CAP_DB)
+    g_db = np.where(active & (over > 0), -np.minimum(over, 8.0), 0.0)   # حداکثر ۸ دسی‌بل کاهش (بدون سوراخ در صدا)
+    g_db = np.convolve(np.pad(g_db, 2, mode='edge'), np.ones(5) / 5, 'valid')
+    g = np.interp(np.arange(N), (np.arange(n) + 0.5) * w, 10 ** (g_db / 20)).astype(np.float32)
+    return crowd * g, float(np.min(g_db))
 
 if __name__ == '__main__':
     os.makedirs(OUT, exist_ok=True)
@@ -46,16 +62,21 @@ if __name__ == '__main__':
     me = Pedalboard([LowpassFilter(6000)])(me, SR)
     me = V18.soften(me) * env(N, [(48.6, 110.0, 0, 0.8, 2.0)])
     intro = V8.smooth_intro() * db(-4 + M.CHEER_REF)
-    wav = M.mix(V8.cfg_v8(intro + chant + live + me), None, murmur, 'S_v19_full')
+    # افزایش خواننده در کُرس‌ها (از D_final_v4): ۲، ۲.۵ و ۱.۵ دسی‌بل
+    tb = np.array([0, 68.2, 68.3, 108.55, 108.6, 164.2, 164.3, 202.0, 202.1, 220.9, 220.95, 242.1, 242.2, N / SR])
+    gb = db(np.array([0, 0, 2, 2, 0, 0, 2.5, 2.5, 0, 0, 1.5, 1.5, 0, 0]))
+    crowd_all, worst = cap_under_lead(chant + live + me, (tb, gb))
+    print('cap: max reduction dB', round(worst, 1))
+    wav = M.mix(V8.cfg_v8(intro + crowd_all), None, murmur, 'S_v19_full')
     x, _ = sf.read(wav, dtype='float32', always_2d=True); x = x.T
     orig = sf.info(os.path.join(WORK, 'song.wav')).frames
     y = x[:, :orig].copy(); f = int(5 * SR); y[:, -f:] *= np.linspace(1, 0, f) ** 2
     sf.write(os.path.join(OUT, 'S_v19.wav'), y.T, SR, subtype='PCM_16')
     V10.write(os.path.join(OUT, 'preview_v19'), y[:, int(26 * SR):int(115 * SR)])
-    crowd = chant + live + me
+    crowd = crowd_all
     lvl = lambda a, b: round(20 * np.log10(rms(crowd[:, int(a * SR):int(b * SR)]) + 1e-12) -
-                             20 * np.log10(rms(M.voc[:, int(a * SR):int(b * SR)]) + 1e-12), 1)
-    rep = {f'{a}-{b}': lvl(a, b) for a, b in [(29, 34), (49, 66), (68, 88), (88, 99), (99, 112), (126, 145),
+                             20 * np.log10(rms(M.voc[:, int(a * SR):int(b * SR)] * float(np.interp((a + b) / 2, tb, gb))) + 1e-12), 1)
+    rep = {f'{a}-{b}': lvl(a, b) for a, b in [(29, 34), (49, 66), (68, 88), (88, 99), (99, 108), (108, 112), (126, 145),
                                                (145, 161), (164, 183), (183, 202), (203, 220), (221, 242)]}
     json.dump(rep, open(os.path.join(OUT, 'v19_levels.json'), 'w'), indent=1)
     print(json.dumps(rep))
