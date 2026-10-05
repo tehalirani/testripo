@@ -2,21 +2,22 @@ const fs = require('fs');
 const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, WidthType, ShadingType,
         AlignmentType, BorderStyle, LevelFormat, HeadingLevel } = require('docx');
 
-const FONT = 'DejaVu Sans';
-const SZ = 21; // 10.5pt
-const r = (t, o = {}) => new TextRun({ text: t, font: FONT, size: o.size || SZ, bold: o.bold, color: o.color, rightToLeft: true });
+const FONT = 'B Nazanin';
+const LATIN = 'Times New Roman'; // B Nazanin has no Latin glyphs
+const SZ = 25; // 12.5pt
+const r = (t, o = {}) => new TextRun({ text: t, font: { ascii: LATIN, hAnsi: LATIN, cs: FONT, eastAsia: FONT }, size: o.size || SZ, sizeComplexScript: o.size || SZ, bold: o.bold, boldComplexScript: o.bold, color: o.color, rightToLeft: true });
 const p = (runs, o = {}) => new Paragraph({
-  bidirectional: true, alignment: o.align || AlignmentType.JUSTIFIED,
+  bidirectional: true, alignment: o.align || AlignmentType.RIGHT,
   spacing: { after: o.after ?? 80, line: 276 },
   children: Array.isArray(runs) ? runs : [r(runs)], ...(o.extra || {}),
 });
 const h = (t) => new Paragraph({
   bidirectional: true, alignment: AlignmentType.RIGHT, spacing: { before: 120, after: 50 },
   border: { bottom: { style: BorderStyle.SINGLE, size: 4, color: '7A9CC6', space: 1 } },
-  children: [r(t, { bold: true, size: 25, color: '1F3B63' })],
+  children: [r(t, { bold: true, size: 29, color: '1F3B63' })],
 });
 const bullet = (runs) => new Paragraph({
-  bidirectional: true, alignment: AlignmentType.JUSTIFIED, spacing: { after: 30, line: 252 },
+  bidirectional: true, alignment: AlignmentType.RIGHT, spacing: { after: 30, line: 252 },
   numbering: { reference: 'b', level: 0 }, children: Array.isArray(runs) ? runs : [r(runs)],
 });
 
@@ -26,7 +27,7 @@ const cell = (t, w, head) => new TableCell({
   shading: head ? { type: ShadingType.CLEAR, fill: 'DCE6F2', color: 'auto' } : undefined,
   margins: { top: 30, bottom: 30, left: 70, right: 70 },
   children: [new Paragraph({ bidirectional: true, alignment: AlignmentType.RIGHT,
-    children: [r(t, { bold: head, size: 19 })] })],
+    children: [r(t, { bold: head, size: 23 })] })],
 });
 const table = (cols, rows) => new Table({
   width: { size: W, type: WidthType.DXA }, columnWidths: cols, visuallyRightToLeft: true,
@@ -35,9 +36,9 @@ const table = (cols, rows) => new Table({
 
 const children = [
   new Paragraph({ bidirectional: true, alignment: AlignmentType.CENTER, spacing: { after: 40 },
-    children: [r('گزارش نهایی پروژه: تبدیل نسخه استودیویی به نسخه لایو با کمک هوش مصنوعی', { bold: true, size: 28, color: '1F3B63' })] }),
+    children: [r('گزارش نهایی پروژه: تبدیل نسخه استودیویی به نسخه لایو با کمک هوش مصنوعی', { bold: true, size: 32, color: '1F3B63' })] }),
   new Paragraph({ bidirectional: true, alignment: AlignmentType.CENTER, spacing: { after: 120 },
-    children: [r('آهنگ «بزن باران» از ایهام  |  ابزار اصلی: Claude Code به‌همراه مدل‌های جداسازی صدا و Kits.ai', { size: 16, color: '555555' })] }),
+    children: [r('آهنگ «بزن باران» از ایهام  |  ابزار اصلی: Claude Code به‌همراه مدل‌های جداسازی صدا و Kits.ai', { size: 21, color: '555555' })] }),
 
   h('۱. هدف و ایده'),
   p('هدف، تبدیل یک آهنگ استودیویی به اجرای زنده‌ی کنسرتی بود. برخلاف ابزارهایی مثل Suno که آهنگ را از نو می‌سازند، در این پروژه صدای اصلی خواننده‌ها و گروه حفظ شد و «فضای کنسرت» (شمارش درامر، تشویق، همخوانی مردم و صدای سالن) دور آن ساخته شد. کل کار با گفتگو و بازخورد شنیداری دانشجو هدایت شد: ۵۱ پرامپت و ۲۹ نسخه.'),
@@ -76,7 +77,7 @@ const children = [
 ];
 
 const doc = new Document({
-  styles: { default: { document: { run: { font: FONT, size: SZ, rightToLeft: true } } } },
+  styles: { default: { document: { run: { font: { ascii: LATIN, hAnsi: LATIN, cs: FONT, eastAsia: FONT }, size: SZ, sizeComplexScript: SZ, rightToLeft: true } } } },
   numbering: { config: [{ reference: 'b', levels: [{ level: 0, format: LevelFormat.BULLET, text: '•', alignment: AlignmentType.RIGHT,
     style: { paragraph: { indent: { right: 300, hanging: 200 } } } }] }] },
   sections: [{ properties: { page: { size: { width: 11906, height: 16838 }, margin: { top: 850, bottom: 850, left: 1000, right: 1000 } } },
