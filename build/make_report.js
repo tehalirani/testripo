@@ -7,17 +7,17 @@ const LATIN = 'Times New Roman'; // B Nazanin has no Latin glyphs
 const SZ = 25; // 12.5pt
 const r = (t, o = {}) => new TextRun({ text: t, font: { ascii: LATIN, hAnsi: LATIN, cs: FONT, eastAsia: FONT }, size: o.size || SZ, sizeComplexScript: o.size || SZ, bold: o.bold, boldComplexScript: o.bold, color: o.color, rightToLeft: true });
 const p = (runs, o = {}) => new Paragraph({
-  bidirectional: true, alignment: o.align || AlignmentType.RIGHT,
+  bidirectional: true, alignment: o.align || AlignmentType.START,
   spacing: { after: o.after ?? 80, line: 276 },
   children: Array.isArray(runs) ? runs : [r(runs)], ...(o.extra || {}),
 });
 const h = (t) => new Paragraph({
-  bidirectional: true, alignment: AlignmentType.RIGHT, spacing: { before: 120, after: 50 },
+  bidirectional: true, alignment: AlignmentType.START, spacing: { before: 120, after: 50 },
   border: { bottom: { style: BorderStyle.SINGLE, size: 4, color: '7A9CC6', space: 1 } },
   children: [r(t, { bold: true, size: 29, color: '1F3B63' })],
 });
 const bullet = (runs) => new Paragraph({
-  bidirectional: true, alignment: AlignmentType.RIGHT, spacing: { after: 30, line: 252 },
+  bidirectional: true, alignment: AlignmentType.START, spacing: { after: 30, line: 252 },
   numbering: { reference: 'b', level: 0 }, children: Array.isArray(runs) ? runs : [r(runs)],
 });
 
@@ -26,7 +26,7 @@ const cell = (t, w, head) => new TableCell({
   width: { size: w, type: WidthType.DXA },
   shading: head ? { type: ShadingType.CLEAR, fill: 'DCE6F2', color: 'auto' } : undefined,
   margins: { top: 30, bottom: 30, left: 70, right: 70 },
-  children: [new Paragraph({ bidirectional: true, alignment: AlignmentType.RIGHT,
+  children: [new Paragraph({ bidirectional: true, alignment: AlignmentType.START,
     children: [r(t, { bold: head, size: 23 })] })],
 });
 const table = (cols, rows) => new Table({
@@ -78,8 +78,8 @@ const children = [
 
 const doc = new Document({
   styles: { default: { document: { run: { font: { ascii: LATIN, hAnsi: LATIN, cs: FONT, eastAsia: FONT }, size: SZ, sizeComplexScript: SZ, rightToLeft: true } } } },
-  numbering: { config: [{ reference: 'b', levels: [{ level: 0, format: LevelFormat.BULLET, text: '•', alignment: AlignmentType.RIGHT,
-    style: { paragraph: { indent: { right: 300, hanging: 200 } } } }] }] },
+  numbering: { config: [{ reference: 'b', levels: [{ level: 0, format: LevelFormat.BULLET, text: '•', alignment: AlignmentType.START,
+    style: { paragraph: { indent: { start: 300, hanging: 200 } } } }] }] },
   sections: [{ properties: { page: { size: { width: 11906, height: 16838 }, margin: { top: 850, bottom: 850, left: 1000, right: 1000 } } },
     children }],
 });
